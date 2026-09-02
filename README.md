@@ -1,36 +1,54 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# NOVA LAB
+
+Stateful, executable scientific environment for external AI agents (Next.js + Prisma + PostgreSQL).
+
+## Database setup
+
+NOVA uses PostgreSQL 16 via Docker Compose with a named volume (`nova_lab_pgdata`).
+
+```bash
+npm run db:up
+npx prisma migrate deploy
+npm run dev
+```
+
+Stop the database (data in the named volume is kept):
+
+```bash
+npm run db:down
+```
+
+Other useful commands:
+
+```bash
+npm run db:status
+npm run db:studio
+```
+
+For local development, `DATABASE_URL` should point at `localhost:5432` / database `nova_lab` (see `.env.example`).
 
 ## Getting Started
 
-First, run the development server:
-
 ```bash
+npm run db:up
+npx prisma migrate deploy
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Production (Vercel + managed PostgreSQL)
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+1. Provision a managed Postgres database (Neon, Supabase, etc.).
+2. In the Vercel project, set:
+   - `DATABASE_URL` — production Postgres connection string
+   - `NEXT_PUBLIC_APP_URL` — `https://<your-production-domain>`
+3. Deploy from git. The `build` script runs `prisma generate`, `prisma migrate deploy`, then `next build`.
+4. Do not commit `.env` files. Use `.env.example` as the template only.
+
+WebMCP tools register in the browser via `document.modelContext` on the deployed HTTPS origin; no WebMCP localhost URLs are hardcoded.
 
 ## Learn More
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- [Next.js Documentation](https://nextjs.org/docs)
+- [Prisma Documentation](https://www.prisma.io/docs)

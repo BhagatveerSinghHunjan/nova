@@ -1,0 +1,162 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ExperimentStatus {
+  DRAFT
+  AWAITING_APPROVAL
+  APPROVED
+  RUNNING
+  COMPLETED
+  ANALYZED
+  REPLICATED
+  REJECTED
+}
+
+enum PlantGrowthFactor {
+  TEMPERATURE
+  WATER
+  LIGHT
+  CO2
+  NUTRIENTS
+}
+
+model Experiment {
+  id                 String              @id @default(uuid())
+  question           String
+  hypothesis         String
+  factors            PlantGrowthFactor[]
+  factorLevels       Json
+  units              Json
+  replicates         Int
+  seed               Int
+  simulationVersion  String
+  simulationWorldKey String
+  status             ExperimentStatus    @default(DRAFT)
+  provenance         Json
+  approvalRationale  String?
+  rejectionRationale String?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  submittedAt        DateTime?
+  approvedAt         DateTime?
+  rejectedAt         DateTime?
+  startedAt          DateTime?
+  completedAt        DateTime?
+  analyzedAt         DateTime?
+  replicatedAt       DateTime?
+
+  parentExperimentId String?
+  parentExperiment   Experiment?  @relation("ExperimentLineage", fields: [parentExperimentId], references: [id], onDelete: Restrict)
+  childExperiments   Experiment[] @relation("ExperimentLineage")
+
+  observations            SimulationObservation[]
+  analyses                Analysis[]
+  findings                Finding[]
+  originalReplications    Replication[]           @relation("OriginalExperiment")
+  replicationExperiments  Replication[]           @relation("ReplicationExperiment")
+  events                  ExperimentEvent[]
+
+  @@index([status])
+  @@index([parentExperimentId])
+}
+
+model ExperimentEvent {
+  id           String     @id @default(uuid())
+  experimentId String
+  experiment   Experiment @relation(fields: [experimentId], references: [id], onDelete: Cascade)
+  type         String
+  metadata     Json
+  createdAt    DateTime   @default(now())
+
+  @@index([experimentId])
+  @@index([type])
+  @@index([experimentId, type])
+}
+
+model SimulationObservation {
+  id                String     @id @default(uuid())
+  experimentId      String
+  experiment        Experiment @relation(fields: [experimentId], references: [id], onDelete: Cascade)
+  dataLabel         String     @default("synthetic")
+  simulationVersion String
+  replicateIndex    Int
+  combinationIndex  Int
+  factorValues      Json
+  biomass           Float
+  growthRate        Float
+  observationSeed   Int
+  createdAt         DateTime   @default(now())
+
+  @@index([experimentId])
+  @@unique([experimentId, replicateIndex, combinationIndex])
+}
+
+model Analysis {
+  id                       String     @id @default(uuid())
+  experimentId             String
+  experiment               Experiment @relation(fields: [experimentId], references: [id], onDelete: Cascade)
+  analysisVersion          String
+  model                    String
+  effects                  Json
+  sampleSize               Int
+  residualDegreesOfFreedom Int
+  residualStandardError    Float
+  responseVariable         String
+  simulationVersion        String
+  seed                     Int
+  createdAt                DateTime   @default(now())
+
+  findings Finding[]
+
+  @@index([experimentId])
+}
+
+model Finding {
+  id           String      @id @default(uuid())
+  experimentId String
+  experiment   Experiment  @relation(fields: [experimentId], references: [id], onDelete: Cascade)
+  analysisId   String
+  analysis     Analysis    @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+  findingText  String
+  confidence   Float
+  replicationId String?
+  replication  Replication? @relation(fields: [replicationId], references: [id], onDelete: SetNull)
+  createdAt    DateTime    @default(now())
+
+  @@index([experimentId])
+  @@index([analysisId])
+  @@index([replicationId])
+}
+
+model Replication {
+  id                            String     @id @default(uuid())
+  originalExperimentId          String
+  originalExperiment            Experiment @relation("OriginalExperiment", fields: [originalExperimentId], references: [id], onDelete: Cascade)
+  replicationExperimentId       String
+  replicationExperiment         Experiment @relation("ReplicationExperiment", fields: [replicationExperimentId], references: [id], onDelete: Cascade)
+  originalSeed                  Int
+  replicationSeed               Int
+  originalEffect                Json
+  replicationEffect             Json
+  originalConfidenceInterval    Json
+  replicationConfidenceInterval Json
+  sameDirection                 Boolean
+  confidenceIntervalOverlap     Boolean
+  relativeEffectDifference      Float
+  replicationSuccess            Boolean
+  analysisVersion               String
+  simulationVersion             String
+  createdAt                     DateTime   @default(now())
+
+  findings Finding[]
+
+  @@index([originalExperimentId])
+  @@index([replicationExperimentId])
+  @@unique([originalExperimentId, replicationExperimentId])
+}
