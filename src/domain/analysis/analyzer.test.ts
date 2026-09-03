@@ -8,6 +8,7 @@ import {
   compareReplicationAnalyses,
   FACTORIAL_GROWTH_MODEL,
 } from "./index";
+import { studentTQuantile } from "./math/t-distribution";
 import { simulateExperiment } from "@/domain/simulation/simulator";
 import type { ExperimentDesign } from "@/domain/simulation/types";
 
@@ -101,6 +102,35 @@ describe("analyzeFactorialGrowth", () => {
     expect(() => analyzeFactorialGrowth(simulation.observations)).toThrow(
       /missing temperature or water/i,
     );
+  });
+
+  it("reports 95% CIs consistent with estimate ± t_crit(0.975, df) × SE", () => {
+    const simulation = simulateExperiment(factorialDesign);
+    const analysis = analyzeFactorialGrowth(simulation.observations);
+    const df = analysis.residual_degrees_of_freedom;
+    const tCrit = studentTQuantile(0.975, df);
+
+    const effects = [
+      analysis.effects.temperature,
+      analysis.effects.water,
+      analysis.effects.temperature_water_interaction,
+    ];
+
+    for (const effect of effects) {
+      const { estimate, standard_error: se, confidence_interval: ci } = effect;
+
+      expect(ci.level).toBe(0.95);
+      expect(ci.lower).toBeLessThan(estimate);
+      expect(estimate).toBeLessThan(ci.upper);
+
+      const expectedHalfWidth = tCrit * se;
+      const reportedHalfWidth = (ci.upper - ci.lower) / 2;
+
+      // OLS rounds to 8 decimal places; allow tiny absolute tolerance.
+      expect(reportedHalfWidth).toBeCloseTo(expectedHalfWidth, 5);
+      expect(ci.lower).toBeCloseTo(estimate - expectedHalfWidth, 5);
+      expect(ci.upper).toBeCloseTo(estimate + expectedHalfWidth, 5);
+    }
   });
 });
 

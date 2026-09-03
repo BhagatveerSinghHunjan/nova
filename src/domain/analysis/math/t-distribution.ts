@@ -6,8 +6,9 @@ function logGamma(value: number): number {
 
   const x = value;
   let y = value;
+  // Lanczos approximation (Numerical Recipes): tmp = (x+5.5) - (x+0.5)*ln(x+5.5)
   let tmp = x + 5.5;
-  tmp -= x + 0.5;
+  tmp -= (x + 0.5) * Math.log(tmp);
   let ser = 1.000000000190015;
 
   for (const coefficient of coefficients) {
@@ -15,9 +16,73 @@ function logGamma(value: number): number {
     ser += coefficient / y;
   }
 
-  return Math.log(2.5066282746310007 * ser / x) - tmp;
+  return Math.log((2.5066282746310007 * ser) / x) - tmp;
 }
 
+/**
+ * Continued fraction for the incomplete beta function (modified Lentz).
+ * Returns the factor such that I_x(a,b) = front * continuedFraction(a,b,x) / a
+ * when used with the standard front factor.
+ */
+function incompleteBetaContinuedFraction(
+  a: number,
+  b: number,
+  x: number,
+): number {
+  const maxIterations = 200;
+  const epsilon = 3e-12;
+  const fpMin = 1e-30;
+
+  const qab = a + b;
+  const qap = a + 1;
+  const qam = a - 1;
+
+  let c = 1;
+  let d = 1 - (qab * x) / qap;
+  if (Math.abs(d) < fpMin) {
+    d = fpMin;
+  }
+  d = 1 / d;
+  let h = d;
+
+  for (let m = 1; m <= maxIterations; m += 1) {
+    const m2 = 2 * m;
+    let aa = (m * (b - m) * x) / ((qam + m2) * (a + m2));
+    d = 1 + aa * d;
+    if (Math.abs(d) < fpMin) {
+      d = fpMin;
+    }
+    c = 1 + aa / c;
+    if (Math.abs(c) < fpMin) {
+      c = fpMin;
+    }
+    d = 1 / d;
+    h *= d * c;
+
+    aa = (-(a + m) * (qab + m) * x) / ((a + m2) * (qap + m2));
+    d = 1 + aa * d;
+    if (Math.abs(d) < fpMin) {
+      d = fpMin;
+    }
+    c = 1 + aa / c;
+    if (Math.abs(c) < fpMin) {
+      c = fpMin;
+    }
+    d = 1 / d;
+    const delta = d * c;
+    h *= delta;
+
+    if (Math.abs(delta - 1) < epsilon) {
+      break;
+    }
+  }
+
+  return h;
+}
+
+/**
+ * Regularized incomplete beta I_x(a, b).
+ */
 function regularizedIncompleteBeta(x: number, a: number, b: number): number {
   if (x <= 0) {
     return 0;
@@ -27,58 +92,27 @@ function regularizedIncompleteBeta(x: number, a: number, b: number): number {
     return 1;
   }
 
-  const beta =
-    Math.exp(logGamma(a + b) - logGamma(a) - logGamma(b) + a * Math.log(x) + b * Math.log(1 - x));
+  const front = Math.exp(
+    logGamma(a + b) -
+      logGamma(a) -
+      logGamma(b) +
+      a * Math.log(x) +
+      b * Math.log(1 - x),
+  );
 
-  const useContinuedFraction = x > (a + 1) / (a + b + 2);
-
-  if (useContinuedFraction) {
-    return 1 - regularizedIncompleteBeta(1 - x, b, a);
+  if (x < (a + 1) / (a + b + 2)) {
+    return (front * incompleteBetaContinuedFraction(a, b, x)) / a;
   }
 
-  let numerator = 1;
-  let denominator = 1 - (a + b) * x / (a + 1);
-
-  if (Math.abs(denominator) < 1e-30) {
-    denominator = 1e-30;
-  }
-
-  let result = 1 / denominator;
-
-  for (let index = 1; index <= 200; index += 1) {
-    const even = index * 2;
-    let aa = (index * (b - index) * x) / ((a + even - 1) * (a + even));
-    denominator = 1 + aa * denominator;
-    if (Math.abs(denominator) < 1e-30) {
-      denominator = 1e-30;
-    }
-    numerator = 1 + aa / numerator;
-    if (Math.abs(numerator) < 1e-30) {
-      numerator = 1e-30;
-    }
-    result *= numerator / denominator;
-
-    aa = -((a + index) * (a + b + index) * x) / ((a + even) * (a + even + 1));
-    denominator = 1 + aa * denominator;
-    if (Math.abs(denominator) < 1e-30) {
-      denominator = 1e-30;
-    }
-    numerator = 1 + aa / numerator;
-    if (Math.abs(numerator) < 1e-30) {
-      numerator = 1e-30;
-    }
-    const delta = numerator / denominator;
-    result *= delta;
-
-    if (Math.abs(delta - 1) < 1e-10) {
-      break;
-    }
-  }
-
-  return (result * beta) / a;
+  return (
+    1 - (front * incompleteBetaContinuedFraction(b, a, 1 - x)) / b
+  );
 }
 
-export function studentTPValue(tStatistic: number, degreesOfFreedom: number): number {
+export function studentTPValue(
+  tStatistic: number,
+  degreesOfFreedom: number,
+): number {
   if (!Number.isFinite(tStatistic)) {
     return 1;
   }
@@ -93,6 +127,16 @@ export function studentTPValue(tStatistic: number, degreesOfFreedom: number): nu
   return Math.min(1, Math.max(0, p));
 }
 
+/**
+ * Upper (or signed) quantile of Student's t: returns t such that
+ * P(T <= t) = probability for the central t distribution.
+ *
+ * For 95% two-sided CIs, call with probability = 0.975 so that
+ * estimate ± studentTQuantile(0.975, df) * SE.
+ *
+ * Uses the two-tailed survival relation for t >= 0:
+ * P(T <= t) = 1 - 0.5 * P(|T| > t).
+ */
 export function studentTQuantile(
   probability: number,
   degreesOfFreedom: number,
@@ -101,18 +145,41 @@ export function studentTQuantile(
     return 0;
   }
 
-  let lower = 0;
-  let upper = 100;
+  if (probability <= 0) {
+    return Number.NEGATIVE_INFINITY;
+  }
 
-  while (studentTPValue(upper, degreesOfFreedom) > 1 - probability) {
+  if (probability >= 1) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  if (probability < 0.5) {
+    return -studentTQuantile(1 - probability, degreesOfFreedom);
+  }
+
+  if (probability === 0.5) {
+    return 0;
+  }
+
+  // P(|T| > t) = 2 * (1 - probability) when P(T <= t) = probability and t > 0
+  const targetTwoTailedP = 2 * (1 - probability);
+
+  let lower = 0;
+  let upper = 1;
+
+  while (studentTPValue(upper, degreesOfFreedom) > targetTwoTailedP) {
     upper *= 2;
+    if (!Number.isFinite(upper) || upper > 1e8) {
+      break;
+    }
   }
 
   for (let iteration = 0; iteration < 100; iteration += 1) {
     const middle = (lower + upper) / 2;
-    const survival = 1 - studentTPValue(middle, degreesOfFreedom);
+    const twoTailedP = studentTPValue(middle, degreesOfFreedom);
 
-    if (survival > probability) {
+    // Two-tailed p decreases as |t| increases.
+    if (twoTailedP > targetTwoTailedP) {
       lower = middle;
     } else {
       upper = middle;
